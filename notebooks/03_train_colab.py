@@ -67,11 +67,30 @@ def flush():
 # ## Section 1: Configuration
 
 #%%
+def get_paths():
+    """Auto-detect paths based on environment."""
+    # Colab
+    colab_data = Path("/content/drive/MyDrive/kaggle/csiro-biomass")
+    colab_output = Path("/content/drive/MyDrive/kaggle/outputs")
+
+    # Local
+    local_data = Path("./data")
+    local_output = Path("./outputs")
+
+    # Check which environment
+    if colab_data.exists():
+        return colab_data, colab_output
+    elif local_data.exists():
+        return local_data, local_output
+    else:
+        # Fallback to relative path
+        return local_data, local_output
+
 @dataclass
 class CFG:
-    # Paths (Colab Google Drive)
-    DATA_PATH: Path = Path("/content/drive/MyDrive/kaggle/csiro-biomass")
-    OUTPUT_DIR: Path = Path("/content/drive/MyDrive/kaggle/outputs")
+    # Paths (auto-detect: Colab or Local)
+    DATA_PATH: Path = None
+    OUTPUT_DIR: Path = None
 
     # Model
     backbone: str = "vit_large_patch14_dinov2.lvd142m"
@@ -108,6 +127,10 @@ class CFG:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     def __post_init__(self):
+        # Auto-detect paths
+        if self.DATA_PATH is None or self.OUTPUT_DIR is None:
+            self.DATA_PATH, self.OUTPUT_DIR = get_paths()
+
         if self.targets is None:
             self.targets = ['Dry_Green_g', 'Dry_Dead_g', 'Dry_Clover_g', 'GDM_g', 'Dry_Total_g']
         if self.train_folds is None:
@@ -239,9 +262,14 @@ def prepare_data(cfg: CFG) -> pd.DataFrame:
     return train_wide
 
 #%%
-# Mount Google Drive (uncomment in Colab)
-# from google.colab import drive
-# drive.mount('/content/drive')
+# Mount Google Drive (Colab only)
+import sys
+if 'google.colab' in sys.modules:
+    from google.colab import drive
+    drive.mount('/content/drive', force_remount=False)
+    print("Google Drive mounted")
+else:
+    print("Running locally, skipping Drive mount")
 
 # Load data
 train_df = prepare_data(cfg)
@@ -805,7 +833,7 @@ def train_fold(fold: int, train_df: pd.DataFrame, cfg: CFG):
     )
 
     # Loss & Scaler
-    criterion = WeightedBiomassLoss(physics_weight=0.1)
+    criterion = WeightedBiomassLoss(physics_weight=0.1).to(cfg.device)
     scaler = torch.amp.GradScaler('cuda') if cfg.mixed_precision else None
 
     # Training history
