@@ -10,30 +10,34 @@
 # - Single fold for speed
 
 #%%
+# === Kaggle 커널 재시작 필요 시 이 셀만 먼저 실행 ===
+# 런타임 -> 세션 다시 시작 후 실행
+
 import os
 import gc
 import random
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import cv2
 from tqdm.auto import tqdm
+from sklearn.model_selection import KFold
 
+# PyTorch imports (커널 재시작 후 정상 작동)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import torchvision.models as models
 
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from sklearn.model_selection import KFold
 
-# torchvision - Kaggle에서 기본 제공, 인터넷 OFF에서도 사용 가능
-import torchvision.models as models
+print(f"PyTorch version: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
 
 #%%
 def seed_everything(seed=42):
@@ -58,7 +62,7 @@ seed_everything(42)
 #%%
 class CFG:
     # === Kaggle Paths ===
-    DATA_PATH = Path("/kaggle/input/csiro-pasture-biomass")  # 실제 대회 데이터셋 이름으로 변경
+    DATA_PATH = Path("/kaggle/input/csiro-biomass")
     OUTPUT_DIR = Path("/kaggle/working")
 
     # === Model ===
