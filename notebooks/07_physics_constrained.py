@@ -35,6 +35,10 @@ from albumentations.pytorch import ToTensorV2
 
 print(f"PyTorch version: {torch.__version__}")
 print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU count: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
 
 #%%
 def seed_everything(seed=42):
@@ -73,8 +77,10 @@ class CFG:
     # === Training ===
     n_folds = 5
     epochs = 15
-    batch_size = 8
-    lr = 1e-4
+    # GPU 개수에 따라 batch_size 자동 조정
+    n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    batch_size = 8 * n_gpus  # T4 2개면 16
+    lr = 1e-4 * n_gpus  # Linear scaling rule
     weight_decay = 1e-4
     
     # === Multi-Modal ===
@@ -557,7 +563,13 @@ def train_fold(fold: int, train_df: pd.DataFrame, cfg) -> float:
         dropout=0.3,
         pretrained=True,
         weights_path=weights_path
-    ).to(cfg.device)
+    )
+    
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        print(f"🚀 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
+    model = model.to(cfg.device)
     
     # Optimizer & Scheduler
     optimizer = AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -579,8 +591,10 @@ def train_fold(fold: int, train_df: pd.DataFrame, cfg) -> float:
         
         if cv_score > best_score:
             best_score = cv_score
+            # Save model (handle DataParallel)
+            model_to_save = model.module if hasattr(model, 'module') else model
             torch.save({
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': model_to_save.state_dict(),
                 'fold': fold,
                 'score': best_score,
                 'tabular_scaler': tabular_scaler,
