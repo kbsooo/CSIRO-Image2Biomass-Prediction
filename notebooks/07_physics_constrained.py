@@ -89,7 +89,8 @@ class CFG:
     
     # === Misc ===
     seed = 42
-    num_workers = 2
+    # Kaggle 환경에서 multiprocessing 오류 방지를 위해 num_workers=0
+    num_workers = 0
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     # === Targets (물리적 제약 조건 기반) ===
