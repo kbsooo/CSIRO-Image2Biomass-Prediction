@@ -68,7 +68,7 @@ class CFG:
     WEIGHTS_PATH = None  # Will be set after kagglehub download
     
     # === Model ===
-    model_name = "vit_large_patch16_224.dinov2.lvd142m"
+    model_name = "vit_large_patch16_dinov3_qkvb.lvd1689m"  # DINOv3 Large
     backbone_dim = 1024
     img_size = (518, 518)  # DINOv2 optimal (divisible by 14)
     
@@ -350,7 +350,7 @@ class CSIROModelV2(nn.Module):
         if pretrained and weights_path and Path(weights_path).exists():
             print(f"Loading backbone from: {weights_path}")
             self.backbone = timm.create_model(
-                "vit_large_patch16_224.dinov2.lvd142m",
+                model_name,
                 pretrained=False,
                 num_classes=0,
                 global_pool='avg'

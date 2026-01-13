@@ -31,7 +31,7 @@ class CFG:
     MODELS_DIR = Path("/kaggle/input/csiro-optimized-models")  # 학습된 모델 경로
     WEIGHTS_PATH = Path("/kaggle/input/pretrained-weights-biomass/dinov3_large/dinov3_large")
     
-    model_name = "vit_large_patch16_224.dinov2.lvd142m"
+    model_name = "vit_large_patch16_dinov3_qkvb.lvd1689m"  # DINOv3 Large
     img_size = (518, 518)
     dropout = 0.3
     
