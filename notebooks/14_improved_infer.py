@@ -46,6 +46,7 @@ class CFG:
     head_hidden_dim = 128
     dropout = 0.1
     use_zero_inflated_clover = True
+    use_log1p = False  # Physics constraint와 충돌하므로 비활성화
 
     batch_size = 16
     num_workers = 0  # Avoid multiprocessing errors

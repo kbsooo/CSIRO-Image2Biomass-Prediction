@@ -141,7 +141,7 @@ class CFG:
     mixup_alpha = 0.2
 
     # === Target Transform ===
-    use_log1p = True
+    use_log1p = False  # Physics constraint (gdm=green+clover)와 충돌하므로 비활성화
 
     # === Other ===
     seed = 42
