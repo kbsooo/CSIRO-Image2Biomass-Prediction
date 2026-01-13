@@ -61,8 +61,8 @@ class CFG:
     MODELS_DIR = Path("/kaggle/input/csiro-v15-models")
     
     # === Model ===
-    # hf_hub: prefix로 HuggingFace에서 모델 아키텍처 로드
-    model_name = "hf_hub:timm/vit_large_patch16_224.dinov2.lvd142m"
+    # pretrained-weights-biomass Dataset에 등록된 모델명
+    model_name = "vit_large_patch16_dinov3_qkvb"
     img_size = (512, 512)
     dropout = 0.1
     
