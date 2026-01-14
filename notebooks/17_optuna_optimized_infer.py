@@ -55,9 +55,11 @@ class CFG:
     model_name = "vit_large_patch16_dinov3_qkvb.lvd1689m"
     img_size = (512, 512)
     
-    # Optuna best
+    # Optuna best (v17 train과 동일해야 함!)
     hidden_dim = 512
+    num_layers = 3
     dropout = 0.1
+    use_layernorm = True
     
     batch_size = 32
     num_workers = 0
@@ -95,7 +97,7 @@ class TestDataset(Dataset):
         return left_img, right_img, row['sample_id_prefix']
 
 def get_tta_dataloaders(df, cfg):
-    """7x TTA: Original + Flips + Rotations"""
+    """3x TTA: Original + Flips"""
     loaders = []
     
     transforms_list = [
@@ -116,7 +118,7 @@ def get_tta_dataloaders(df, cfg):
     return loaders
 
 #%% [markdown]
-# ## 🧠 Model
+# ## 🧠 Model (v17 train과 동일한 구조)
 
 #%%
 class FiLM(nn.Module):
@@ -133,41 +135,54 @@ class FiLM(nn.Module):
         return torch.chunk(gamma_beta, 2, dim=1)
 
 
+def make_head(in_dim: int, hidden_dim: int, num_layers: int, dropout: float, use_layernorm: bool):
+    """동적 head 생성 - v16/v17 train과 동일"""
+    layers = []
+    current_dim = in_dim
+    
+    for i in range(num_layers):
+        out_dim = hidden_dim if i < num_layers - 1 else 1
+        layers.append(nn.Linear(current_dim, out_dim if i < num_layers - 1 else hidden_dim))
+        
+        if i < num_layers - 1:
+            if use_layernorm:
+                layers.append(nn.LayerNorm(hidden_dim))
+            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.Dropout(dropout))
+        current_dim = hidden_dim
+    
+    layers.append(nn.Linear(hidden_dim, 1))
+    return nn.Sequential(*layers)
+
+
 class CSIROModelV17(nn.Module):
-    """v17 Optuna-optimized architecture"""
+    """v17 Optuna-optimized architecture - train과 동일한 구조"""
     def __init__(self, cfg, backbone_weights_path=None):
         super().__init__()
         
-        self.backbone = timm.create_model(cfg.model_name, pretrained=False, num_classes=0, global_pool='avg')
-        
+        # Backbone - 먼저 architecture 로드 후 weights 적용
         if backbone_weights_path and Path(backbone_weights_path).exists():
+            print(f"Loading backbone from: {backbone_weights_path}")
+            self.backbone = timm.create_model(cfg.model_name, pretrained=False, num_classes=0, global_pool='avg')
             state = torch.load(backbone_weights_path, map_location='cpu', weights_only=True)
             self.backbone.load_state_dict(state, strict=False)
+            print("✓ Backbone loaded")
+        else:
+            print("WARNING: Backbone weights not found!")
+            self.backbone = timm.create_model(cfg.model_name, pretrained=True, num_classes=0, global_pool='avg')
         
         feat_dim = self.backbone.num_features
         combined_dim = feat_dim * 2
-        hidden_dim = cfg.hidden_dim
-        dropout = cfg.dropout
         
         self.film = FiLM(feat_dim)
         
-        def make_head():
-            return nn.Sequential(
-                nn.Linear(combined_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, 1)
-            )
+        # v17 train과 동일한 make_head 사용
+        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
+        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
+        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
         
-        self.head_green = make_head()
-        self.head_clover = make_head()
-        self.head_dead = make_head()
         self.softplus = nn.Softplus(beta=1.0)
+        print(f"Model: hidden={cfg.hidden_dim}, layers={cfg.num_layers}, LayerNorm={cfg.use_layernorm}")
     
     def forward(self, left_img, right_img):
         left_feat = self.backbone(left_img)
@@ -230,10 +245,14 @@ def predict_ensemble(cfg, tta_loaders):
     print(f"Found {len(model_files)} models")
     
     for model_file in model_files:
-        print(f"Loading {model_file.name}...")
+        print(f"\nLoading {model_file.name}...")
         
+        # 1. Backbone weights로 모델 생성
         model = CSIROModelV17(cfg, cfg.BACKBONE_WEIGHTS).to(cfg.device)
+        
+        # 2. 학습된 fold weights로 전체 덮어쓰기
         model.load_state_dict(torch.load(model_file, map_location=cfg.device))
+        print("✓ Fold weights loaded")
         
         preds, ids = predict_with_tta(model, tta_loaders, cfg.device)
         all_fold_preds.append(preds)
