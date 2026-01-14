@@ -251,9 +251,29 @@ class FiLM(nn.Module):
         return torch.chunk(gamma_beta, 2, dim=1)
 
 
+def make_head(in_dim: int, hidden_dim: int, num_layers: int, dropout: float, use_layernorm: bool):
+    """동적 head 생성 - v16 Optuna와 동일"""
+    layers = []
+    current_dim = in_dim
+    
+    for i in range(num_layers):
+        out_dim = hidden_dim if i < num_layers - 1 else 1
+        layers.append(nn.Linear(current_dim, out_dim if i < num_layers - 1 else hidden_dim))
+        
+        if i < num_layers - 1:
+            if use_layernorm:
+                layers.append(nn.LayerNorm(hidden_dim))
+            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.Dropout(dropout))
+        current_dim = hidden_dim
+    
+    layers.append(nn.Linear(hidden_dim, 1))
+    return nn.Sequential(*layers)
+
+
 class CSIROModelV17(nn.Module):
     """
-    Optuna-optimized architecture:
+    Optuna-optimized architecture (v16과 동일한 make_head 사용):
     - hidden_dim: 512
     - num_layers: 3
     - LayerNorm: True
@@ -278,30 +298,14 @@ class CSIROModelV17(nn.Module):
         
         self.film = FiLM(feat_dim)
         
-        # 3-layer head with LayerNorm (Optuna best)
-        def make_head():
-            return nn.Sequential(
-                # Layer 1
-                nn.Linear(combined_dim, cfg.hidden_dim),
-                nn.LayerNorm(cfg.hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(cfg.dropout),
-                # Layer 2
-                nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
-                nn.LayerNorm(cfg.hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Dropout(cfg.dropout),
-                # Layer 3 (output)
-                nn.Linear(cfg.hidden_dim, 1)
-            )
-        
-        self.head_green = make_head()
-        self.head_clover = make_head()
-        self.head_dead = make_head()
+        # v16 Optuna와 동일한 make_head 함수 사용
+        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
+        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
+        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout, cfg.use_layernorm)
         
         self.softplus = nn.Softplus(beta=1.0)
         
-        print(f"Model: hidden={cfg.hidden_dim}, layers=3, LayerNorm=True, dropout={cfg.dropout}")
+        print(f"Model: hidden={cfg.hidden_dim}, layers={cfg.num_layers}, LayerNorm={cfg.use_layernorm}, dropout={cfg.dropout}")
     
     def forward(self, left_img, right_img):
         left_feat = self.backbone(left_img)
