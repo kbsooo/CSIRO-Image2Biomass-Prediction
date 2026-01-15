@@ -47,11 +47,13 @@ print(f"CUDA: {torch.cuda.is_available()}")
 import wandb
 
 # wandb 로그인 (API key 필요)
-# Colab에서: wandb.login() 실행 후 API key 입력
 wandb.login()
 
-PROJECT_NAME = "csiro-biomass-v19"
-print(f"✓ WandB project: {PROJECT_NAME}")
+# WandB 설정
+WANDB_ENTITY = "kbsoo0620-"  # 본인의 wandb entity
+WANDB_PROJECT = "csiro"
+
+print(f"✓ WandB: {WANDB_ENTITY}/{WANDB_PROJECT}")
 
 #%% [markdown]
 # ## 🔐 Setup
@@ -436,7 +438,8 @@ def run_trial(trial_key, config, train_df):
     
     # Start WandB run
     run = wandb.init(
-        project=PROJECT_NAME,
+        entity=WANDB_ENTITY,
+        project=WANDB_PROJECT,
         name=config['name'],
         config=config,
         reinit=True
