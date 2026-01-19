@@ -591,38 +591,34 @@ print(f"\n✓ Collected predictions from: {list(predictions.keys())}")
 # ## 🎯 Ensemble & Submission
 
 #%%
-# 여러 앙상블 방법 시도
-print("\n=== Ensemble Methods ===")
+# ⚠️ 여기서 앙상블 방법 선택!
+# 옵션: "simple", "rank", "weighted"
+ENSEMBLE_METHOD = "simple"
 
-# 1. 단순 평균
-pred_simple = simple_average(predictions)
-print(f"1. Simple Average: shape={pred_simple.shape}")
-
-# 2. 순위 기반 평균
-pred_rank = rank_average(predictions)
-print(f"2. Rank Average: shape={pred_rank.shape}")
-
-# 3. 가중 평균 (경험적 가중치)
-weights = {'v20': 1.0, 'v22': 0.8, 'v23': 1.0, 'v25': 0.9, 'v26': 1.0}
-pred_weighted = weighted_average(predictions, weights)
-print(f"3. Weighted Average: shape={pred_weighted.shape}")
+# 가중 평균용 가중치 (ENSEMBLE_METHOD = "weighted" 선택 시 사용)
+WEIGHTS = {'v20': 1.0, 'v22': 0.8, 'v23': 1.0, 'v25': 0.9, 'v26': 1.0}
 
 #%%
-# 최종 앙상블 선택 (기본: 단순 평균)
-ENSEMBLE_METHOD = "simple"  # "simple", "rank", "weighted"
+print("\n=== Generating Ensemble ===")
 
 if ENSEMBLE_METHOD == "simple":
-    final_preds = pred_simple
+    final_preds = simple_average(predictions)
+    print("✓ Method: Simple Average")
 elif ENSEMBLE_METHOD == "rank":
-    final_preds = pred_rank
+    final_preds = rank_average(predictions)
+    print("✓ Method: Rank Average")
+elif ENSEMBLE_METHOD == "weighted":
+    final_preds = weighted_average(predictions, WEIGHTS)
+    print(f"✓ Method: Weighted Average")
+    print(f"  Weights: {WEIGHTS}")
 else:
-    final_preds = pred_weighted
+    raise ValueError(f"Unknown method: {ENSEMBLE_METHOD}")
 
-print(f"\n✓ Using: {ENSEMBLE_METHOD} ensemble")
+print(f"  Shape: {final_preds.shape}")
 
 #%%
 # 예측 통계
-print("\n=== Final Prediction Statistics ===")
+print("\n=== Prediction Statistics ===")
 print(f"{'Target':<15} {'Mean':>10} {'Std':>10} {'Min':>10} {'Max':>10}")
 for idx, target in enumerate(TARGET_ORDER):
     vals = final_preds[:, idx]
@@ -644,30 +640,10 @@ sub_df['sample_id'] = sub_df['sample_id_prefix'] + '__' + sub_df['target_name']
 submission = sub_df[['sample_id', 'target']]
 submission.to_csv('submission.csv', index=False)
 
-print(f"\n✅ Saved: {len(submission)} rows")
-
-#%%
+# 검증
 sample_sub = pd.read_csv(cfg.DATA_PATH / "sample_submission.csv")
-assert len(submission) == len(sample_sub)
-print("✓ Format verified!")
+assert len(submission) == len(sample_sub), "Format mismatch!"
 
-#%% [markdown]
-# ## 🔬 추가 실험: 다른 앙상블 방법 submission 저장
+print(f"\n✅ submission.csv saved ({ENSEMBLE_METHOD} method)")
+print(f"   {len(submission)} rows")
 
-#%%
-# 각 앙상블 방법별 submission 저장
-for method, preds in [("simple", pred_simple), ("rank", pred_rank), ("weighted", pred_weighted)]:
-    pred_df = pd.DataFrame(preds, columns=TARGET_ORDER)
-    pred_df['sample_id_prefix'] = sample_ids
-    
-    sub_df = pred_df.melt(
-        id_vars=['sample_id_prefix'],
-        value_vars=TARGET_ORDER,
-        var_name='target_name',
-        value_name='target'
-    )
-    sub_df['sample_id'] = sub_df['sample_id_prefix'] + '__' + sub_df['target_name']
-    
-    submission = sub_df[['sample_id', 'target']]
-    submission.to_csv(f'submission_{method}.csv', index=False)
-    print(f"✓ Saved: submission_{method}.csv")
