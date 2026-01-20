@@ -676,7 +676,7 @@ if GDRIVE_SAVE_PATH:
             'num_layers': cfg.num_layers,
             'dropout': cfg.dropout,
             'freeze_backbone': cfg.freeze_backbone,
-            'fold_scores': fold_scores,
+            'fold_scores': [float(s) for s in fold_scores],  # numpy → float
             'mean_cv': float(mean_cv),
             'std_cv': float(std_cv),
             'total_oof_score': float(total_oof_score),
