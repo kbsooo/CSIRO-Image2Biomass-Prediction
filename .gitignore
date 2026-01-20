@@ -1,4 +1,22 @@
-# data/
-# # *.log
-# src/
-# kaggle_weights/
+# Data files (from Kaggle, not needed in git)
+data/train/
+data/test/
+data/*.csv
+
+# Large EDA images
+data/*.png
+
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+
+# Virtual environment
+.venv/
+
+# Kaggle weights
+kaggle_weights/
+
+# Temporary files
+*.log
+*.tmp
