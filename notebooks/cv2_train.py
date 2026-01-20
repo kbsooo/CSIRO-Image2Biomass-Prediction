@@ -59,11 +59,11 @@ class CFG:
     dropout = 0.3          # 시도: 0.1, 0.2, 0.3, 0.4, 0.5
     
     # === Backbone ===
-    freeze_backbone = True  # ⭐ Backbone 동결
+    freeze_backbone = False  # True: backbone 동결, False: backbone도 학습
     
     # === Training ===
-    lr = 1e-3              # Frozen backbone이면 높은 lr 가능
-    weight_decay = 1e-3
+    lr = 2e-4              # freeze=False면 낮은 lr 사용
+    weight_decay = 1e-4
     warmup_ratio = 0.1
     
     batch_size = 16        # Frozen이면 더 큰 batch 가능
