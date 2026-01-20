@@ -102,24 +102,40 @@ seed_everything(42)
 #%%
 class CFG:
     """
-    ⚠️ Grid Search: 이 값들을 변경하고 실행하세요!
+    ⭐ Grid Search Guide (연구 기반 추천)
     
-    추천 실험:
-    1. hidden_dim: 64, 128, 256, 512
-    2. num_layers: 1, 2, 3
-    3. dropout: 0.2, 0.3, 0.4
+    DINOv2 Large + 357개 이미지 = 작은 Head가 유리!
+    
+    [1차 실험 - 기본 탐색]
+    ────────────────────────────────────────
+    | EXP | hidden | layers | dropout | lr   |
+    |-----|--------|--------|---------|------|
+    | 1   | 128    | 1      | 0.3     | 3e-4 |
+    | 2   | 256    | 1      | 0.4     | 3e-4 |
+    | 3   | 128    | 2      | 0.3     | 2e-4 |
+    | 4   | 64     | 1      | 0.4     | 5e-4 |
+    | 5   | 256    | 2      | 0.3     | 2e-4 |
+    ────────────────────────────────────────
+    
+    [2차 실험 - 최적화]
+    1차에서 가장 좋은 범위 주변 탐색
+    
+    참고: Frozen backbone + MLP head (1-2 layers)가
+    소규모 데이터셋 regression에 최적 (research-backed)
     """
+    # === ⭐ Backbone Freeze (핵심!) ===
+    freeze_backbone = True   # True: Head만 학습 (추천), False: 전체 학습
+    
     # === Grid Search 대상 파라미터 ===
-    hidden_dim = 256      # 64, 128, 256, 512
-    num_layers = 2        # 1, 2, 3
-    dropout = 0.3         # 0.2, 0.3, 0.4
+    hidden_dim = 128      # 64, 128, 256 (작을수록 추천)
+    num_layers = 1        # 1, 2 (1-2가 최적)
+    dropout = 0.3         # 0.3, 0.4, 0.5 (높을수록 추천)
     
     # === 해상도 (고정) ===
     img_size = (560, 560)
     
     # === Training 파라미터 ===
-    lr = 2e-4
-    backbone_lr_mult = 0.1
+    lr = 3e-4             # freeze=True일 때 더 큰 lr 가능
     warmup_ratio = 0.1
     weight_decay = 1e-4
     
@@ -129,7 +145,7 @@ class CFG:
     hue_jitter = 0.02
     
     # === Weighted Loss (핵심!) ===
-    use_weighted_loss = True   # True: Weighted Loss, False: Simple MSE
+    use_weighted_loss = True
     aux_weight = 0.2
     
     use_layernorm = True
@@ -138,17 +154,20 @@ cfg = CFG()
 
 # 실험 이름 자동 생성
 EXP_NAME = f"cv2_h{cfg.hidden_dim}_l{cfg.num_layers}_d{int(cfg.dropout*10)}"
+if cfg.freeze_backbone:
+    EXP_NAME += "_frozen"
 if cfg.use_weighted_loss:
     EXP_NAME += "_wloss"
 
 print("="*60)
 print(f"🔧 Experiment: {EXP_NAME}")
 print("="*60)
+print(f"  freeze_backbone: {cfg.freeze_backbone} {'(⭐ 추천)' if cfg.freeze_backbone else ''}")
 print(f"  hidden_dim: {cfg.hidden_dim}")
 print(f"  num_layers: {cfg.num_layers}")
 print(f"  dropout: {cfg.dropout}")
+print(f"  lr: {cfg.lr}")
 print(f"  use_weighted_loss: {cfg.use_weighted_loss}")
-print(f"  img_size: {cfg.img_size}")
 
 #%%
 if IS_KAGGLE:
@@ -465,6 +484,15 @@ def train_fold(fold, train_df, cfg, device="cuda"):
     # Model
     model = CSIROModelCV2(cfg).to(device)
     
+    # === Backbone Freeze ===
+    if cfg.freeze_backbone:
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+        print("  ❄️ Backbone FROZEN (Head only training)")
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"  Trainable: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.1f}%)")
+    
     # Loss
     if cfg.use_weighted_loss:
         main_criterion = WeightedMSELoss().to(device)
@@ -473,19 +501,29 @@ def train_fold(fold, train_df, cfg, device="cuda"):
         main_criterion = nn.MSELoss()
         print("  Using Simple MSE Loss")
     
-    # Optimizer
-    backbone_params = list(model.backbone.parameters())
-    head_params = (list(model.head_green.parameters()) + 
-                   list(model.head_clover.parameters()) +
-                   list(model.head_dead.parameters()) + 
-                   list(model.head_height.parameters()) +
-                   list(model.head_ndvi.parameters()) +
-                   list(model.film.parameters()))
-    
-    optimizer = AdamW([
-        {'params': backbone_params, 'lr': cfg.lr * cfg.backbone_lr_mult},
-        {'params': head_params, 'lr': cfg.lr}
-    ], weight_decay=cfg.weight_decay)
+    # Optimizer (freeze에 따라 다르게 설정)
+    if cfg.freeze_backbone:
+        # Backbone frozen: Head만 학습
+        head_params = (list(model.head_green.parameters()) + 
+                       list(model.head_clover.parameters()) +
+                       list(model.head_dead.parameters()) + 
+                       list(model.head_height.parameters()) +
+                       list(model.head_ndvi.parameters()) +
+                       list(model.film.parameters()))
+        optimizer = AdamW(head_params, lr=cfg.lr, weight_decay=cfg.weight_decay)
+    else:
+        # Full training
+        backbone_params = list(model.backbone.parameters())
+        head_params = (list(model.head_green.parameters()) + 
+                       list(model.head_clover.parameters()) +
+                       list(model.head_dead.parameters()) + 
+                       list(model.head_height.parameters()) +
+                       list(model.head_ndvi.parameters()) +
+                       list(model.film.parameters()))
+        optimizer = AdamW([
+            {'params': backbone_params, 'lr': cfg.lr * 0.1},
+            {'params': head_params, 'lr': cfg.lr}
+        ], weight_decay=cfg.weight_decay)
     
     total_steps = len(train_loader) * cfg.epochs
     warmup_steps = int(total_steps * cfg.warmup_ratio)
