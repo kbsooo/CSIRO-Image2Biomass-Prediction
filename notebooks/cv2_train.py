@@ -1,15 +1,12 @@
 #%% [markdown]
-# # 🚀 CV2: Weighted Loss + Grid Search Ready
+# # 🚀 CV2: Weighted Loss + Frozen Backbone
 #
 # **핵심 변경사항**:
-# 1. Date-based CV (cv1에서 검증됨)
-# 2. 해상도 560x560
-# 3. ⭐ **Weighted Loss**: Dry_Total_g에 50% 가중치!
-# 4. 수동 Grid Search 지원
-# 5. ZIP 압축 저장
-#
-# **Grid Search 사용법**:
-# CFG 클래스의 파라미터를 변경하고 실행!
+# 1. ✅ Date-based CV (Sampling_Date 그룹핑)
+# 2. ✅ 해상도 560x560
+# 3. ⭐ **Weighted Loss**: 대회 metric에 맞춘 가중치 (Total 50%!)
+# 4. ⭐ **Frozen Backbone**: DINOv2 고정, Head만 학습
+# 5. Grid Search 용이한 구조
 
 #%%
 import os
@@ -44,6 +41,59 @@ tqdm.pandas()
 
 print(f"PyTorch: {torch.__version__}")
 print(f"CUDA: {torch.cuda.is_available()}")
+
+#%% [markdown]
+# ## ⚙️ Grid Search Configuration
+#
+# **여기서 파라미터 변경하세요!**
+
+#%%
+# ========================================
+# ⚠️ GRID SEARCH: 여기서 파라미터 변경!
+# ========================================
+
+class CFG:
+    # === Model Architecture ===
+    hidden_dim = 256       # 시도: 64, 128, 256, 512
+    num_layers = 2         # 시도: 1, 2, 3
+    dropout = 0.3          # 시도: 0.1, 0.2, 0.3, 0.4, 0.5
+    
+    # === Backbone ===
+    freeze_backbone = True  # ⭐ Backbone 동결
+    
+    # === Training ===
+    lr = 1e-3              # Frozen backbone이면 높은 lr 가능
+    weight_decay = 1e-3
+    warmup_ratio = 0.1
+    
+    batch_size = 16        # Frozen이면 더 큰 batch 가능
+    epochs = 30
+    patience = 7
+    
+    # === Augmentation ===
+    hue_jitter = 0.02
+    
+    # === Loss ===
+    use_weighted_loss = True  # ⭐ Weighted Loss 사용
+    aux_weight = 0.2
+    
+    # === Resolution ===
+    img_size = (560, 560)
+
+cfg = CFG()
+
+# 설정 출력
+print("="*60)
+print("🔧 CV2 Configuration")
+print("="*60)
+print(f"  hidden_dim: {cfg.hidden_dim}")
+print(f"  num_layers: {cfg.num_layers}")
+print(f"  dropout: {cfg.dropout}")
+print(f"  freeze_backbone: {cfg.freeze_backbone}")
+print(f"  use_weighted_loss: {cfg.use_weighted_loss}")
+print(f"  lr: {cfg.lr}")
+print(f"  batch_size: {cfg.batch_size}")
+print("="*60)
 
 #%% [markdown]
 # ## 📊 WandB Setup
@@ -96,79 +146,6 @@ def flush():
 
 seed_everything(42)
 
-#%% [markdown]
-# ## ⚙️ Configuration (Grid Search Here!)
-
-#%%
-class CFG:
-    """
-    ⭐ Grid Search Guide (연구 기반 추천)
-    
-    DINOv2 Large + 357개 이미지 = 작은 Head가 유리!
-    
-    [1차 실험 - 기본 탐색]
-    ────────────────────────────────────────
-    | EXP | hidden | layers | dropout | lr   |
-    |-----|--------|--------|---------|------|
-    | 1   | 128    | 1      | 0.3     | 3e-4 |
-    | 2   | 256    | 1      | 0.4     | 3e-4 |
-    | 3   | 128    | 2      | 0.3     | 2e-4 |
-    | 4   | 64     | 1      | 0.4     | 5e-4 |
-    | 5   | 256    | 2      | 0.3     | 2e-4 |
-    ────────────────────────────────────────
-    
-    [2차 실험 - 최적화]
-    1차에서 가장 좋은 범위 주변 탐색
-    
-    참고: Frozen backbone + MLP head (1-2 layers)가
-    소규모 데이터셋 regression에 최적 (research-backed)
-    """
-    # === ⭐ Backbone Freeze (핵심!) ===
-    freeze_backbone = True   # True: Head만 학습 (추천), False: 전체 학습
-    
-    # === Grid Search 대상 파라미터 ===
-    hidden_dim = 128      # 64, 128, 256 (작을수록 추천)
-    num_layers = 1        # 1, 2 (1-2가 최적)
-    dropout = 0.3         # 0.3, 0.4, 0.5 (높을수록 추천)
-    
-    # === 해상도 (고정) ===
-    img_size = (560, 560)
-    
-    # === Training 파라미터 ===
-    lr = 3e-4             # freeze=True일 때 더 큰 lr 가능
-    warmup_ratio = 0.1
-    weight_decay = 1e-4
-    
-    batch_size = 8
-    epochs = 25
-    patience = 7
-    hue_jitter = 0.02
-    
-    # === Weighted Loss (핵심!) ===
-    use_weighted_loss = True
-    aux_weight = 0.2
-    
-    use_layernorm = True
-
-cfg = CFG()
-
-# 실험 이름 자동 생성
-EXP_NAME = f"cv2_h{cfg.hidden_dim}_l{cfg.num_layers}_d{int(cfg.dropout*10)}"
-if cfg.freeze_backbone:
-    EXP_NAME += "_frozen"
-if cfg.use_weighted_loss:
-    EXP_NAME += "_wloss"
-
-print("="*60)
-print(f"🔧 Experiment: {EXP_NAME}")
-print("="*60)
-print(f"  freeze_backbone: {cfg.freeze_backbone} {'(⭐ 추천)' if cfg.freeze_backbone else ''}")
-print(f"  hidden_dim: {cfg.hidden_dim}")
-print(f"  num_layers: {cfg.num_layers}")
-print(f"  dropout: {cfg.dropout}")
-print(f"  lr: {cfg.lr}")
-print(f"  use_weighted_loss: {cfg.use_weighted_loss}")
-
 #%%
 if IS_KAGGLE:
     DATA_PATH = Path("/kaggle/input/csiro-biomass")
@@ -185,7 +162,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 print(f"Data: {DATA_PATH}")
 
 #%% [markdown]
-# ## 📊 Data Loading
+# ## 📊 Data & Metrics
 
 #%%
 TARGET_WEIGHTS = {'Dry_Green_g': 0.1, 'Dry_Dead_g': 0.1, 'Dry_Clover_g': 0.1, 'GDM_g': 0.2, 'Dry_Total_g': 0.5}
@@ -216,9 +193,6 @@ train_wide['image_id'] = train_wide['image_path'].apply(lambda x: Path(x).stem)
 train_wide['Month'] = pd.to_datetime(train_wide['Sampling_Date']).dt.month
 
 print(f"Train samples: {len(train_wide)}")
-
-#%% [markdown]
-# ## 🎯 Date-based CV Split
 
 #%%
 def create_proper_folds(df, n_splits=5):
@@ -299,13 +273,13 @@ class BiomassDataset(Dataset):
             left_img = self.transform(left_img)
             right_img = self.transform(right_img)
         
-        # Full targets (5개): [Green, Dead, Clover, GDM, Total]
-        full_targets = torch.tensor([
+        # 5개 타겟 모두 반환 (Weighted Loss용)
+        targets = torch.tensor([
             row['Dry_Green_g'],
             row['Dry_Dead_g'],
             row['Dry_Clover_g'],
             row['Dry_Green_g'] + row['Dry_Clover_g'],  # GDM
-            row['Dry_Green_g'] + row['Dry_Clover_g'] + row['Dry_Dead_g']  # Total
+            row['Dry_Green_g'] + row['Dry_Clover_g'] + row['Dry_Dead_g'],  # Total
         ], dtype=torch.float32)
         
         height_norm = (row['Height_Ave_cm'] - self.height_mean) / (self.height_std + 1e-8)
@@ -313,8 +287,8 @@ class BiomassDataset(Dataset):
         aux_targets = torch.tensor([height_norm, ndvi_norm], dtype=torch.float32)
         
         if self.return_idx:
-            return left_img, right_img, full_targets, aux_targets, idx
-        return left_img, right_img, full_targets, aux_targets
+            return left_img, right_img, targets, aux_targets, idx
+        return left_img, right_img, targets, aux_targets
     
     def get_stats(self):
         return {
@@ -325,33 +299,37 @@ class BiomassDataset(Dataset):
         }
 
 #%% [markdown]
-# ## 📉 Weighted Loss (핵심!)
+# ## ⚡ Weighted Loss
 
 #%%
 class WeightedMSELoss(nn.Module):
     """
-    대회 평가 지표(Weighted R²)에 맞춘 Loss
+    대회 평가 지표에 맞춘 Weighted MSE Loss
     
     가중치:
-    - Dry_Green_g: 10%
-    - Dry_Dead_g: 10%
-    - Dry_Clover_g: 10%
-    - GDM_g: 20%
-    - Dry_Total_g: 50%  ← 가장 중요!
+    - Dry_Green_g: 0.1
+    - Dry_Dead_g: 0.1
+    - Dry_Clover_g: 0.1
+    - GDM_g: 0.2
+    - Dry_Total_g: 0.5  ← 가장 중요!
     """
     def __init__(self):
         super().__init__()
-        # [Green, Dead, Clover, GDM, Total] 순서
+        # [Green, Dead, Clover, GDM, Total]
         self.register_buffer('weights', torch.tensor([0.1, 0.1, 0.1, 0.2, 0.5]))
     
     def forward(self, pred, target):
-        # pred: [B, 5], target: [B, 5]
+        """
+        Args:
+            pred: [B, 5] - [Green, Dead, Clover, GDM, Total]
+            target: [B, 5] - [Green, Dead, Clover, GDM, Total]
+        """
         mse = (pred - target) ** 2  # [B, 5]
-        weighted_mse = (mse * self.weights).sum(dim=1).mean()
-        return weighted_mse
+        weighted_mse = mse * self.weights  # 가중치 적용
+        return weighted_mse.mean()
 
 #%% [markdown]
-# ## 🧠 Model
+# ## 🧠 Model with Frozen Backbone
 
 #%%
 class FiLM(nn.Module):
@@ -367,10 +345,12 @@ class FiLM(nn.Module):
         return torch.chunk(self.mlp(context), 2, dim=1)
 
 
-def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
+def make_head(in_dim, hidden_dim, num_layers, dropout):
+    """유연한 Head 생성"""
     if num_layers == 1:
         return nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1)
@@ -381,8 +361,7 @@ def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
         for i in range(num_layers):
             layers.append(nn.Linear(current_dim, hidden_dim))
             if i < num_layers - 1:
-                if use_layernorm:
-                    layers.append(nn.LayerNorm(hidden_dim))
+                layers.append(nn.LayerNorm(hidden_dim))
                 layers.append(nn.ReLU(inplace=True))
                 layers.append(nn.Dropout(dropout))
             current_dim = hidden_dim
@@ -391,7 +370,7 @@ def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
 
 
 class CSIROModelCV2(nn.Module):
-    """CV2 모델: Weighted Loss 지원"""
+    """CV2 모델: Frozen Backbone + Weighted Loss"""
     def __init__(self, cfg):
         super().__init__()
         
@@ -404,18 +383,22 @@ class CSIROModelCV2(nn.Module):
             state = torch.load(weights_file, map_location='cpu', weights_only=True)
             self.backbone.load_state_dict(state, strict=False)
         
-        feat_dim = self.backbone.num_features
-        combined_dim = feat_dim * 2
+        # ⭐ Backbone 동결
+        if cfg.freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+            print("✓ Backbone frozen")
+        
+        feat_dim = self.backbone.num_features  # 1024
+        combined_dim = feat_dim * 2  # 2048
         
         self.film = FiLM(feat_dim)
         
-        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, 
-                                    cfg.dropout, cfg.use_layernorm)
-        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers,
-                                     cfg.dropout, cfg.use_layernorm)
-        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers,
-                                   cfg.dropout, cfg.use_layernorm)
+        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
+        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
+        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
         
+        # Auxiliary heads
         self.head_height = nn.Sequential(
             nn.Linear(combined_dim, 256),
             nn.ReLU(inplace=True),
@@ -432,8 +415,14 @@ class CSIROModelCV2(nn.Module):
         self.softplus = nn.Softplus(beta=1.0)
     
     def forward(self, left_img, right_img):
-        left_feat = self.backbone(left_img)
-        right_feat = self.backbone(right_img)
+        # Backbone (frozen이면 no_grad)
+        if not any(p.requires_grad for p in self.backbone.parameters()):
+            with torch.no_grad():
+                left_feat = self.backbone(left_img)
+                right_feat = self.backbone(right_img)
+        else:
+            left_feat = self.backbone(left_img)
+            right_feat = self.backbone(right_img)
         
         context = (left_feat + right_feat) / 2
         gamma, beta = self.film(context)
@@ -460,11 +449,11 @@ class CSIROModelCV2(nn.Module):
         return main_output, aux_output
 
 #%% [markdown]
-# ## 🏋️ Training
+# ## 🏋️ Training with OOF Collection
 
 #%%
 def train_fold(fold, train_df, cfg, device="cuda"):
-    """단일 Fold 학습 + OOF 저장"""
+    """학습 + OOF 예측 저장"""
     train_data = train_df[train_df['fold'] != fold].reset_index(drop=True)
     val_data = train_df[train_df['fold'] == fold].reset_index(drop=True)
     
@@ -484,42 +473,13 @@ def train_fold(fold, train_df, cfg, device="cuda"):
     # Model
     model = CSIROModelCV2(cfg).to(device)
     
-    # === Backbone Freeze ===
+    # Optimizer (Frozen backbone이면 head만)
     if cfg.freeze_backbone:
-        for param in model.backbone.parameters():
-            param.requires_grad = False
-        print("  ❄️ Backbone FROZEN (Head only training)")
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        total_params = sum(p.numel() for p in model.parameters())
-        print(f"  Trainable: {trainable_params:,} / {total_params:,} ({100*trainable_params/total_params:.1f}%)")
-    
-    # Loss
-    if cfg.use_weighted_loss:
-        main_criterion = WeightedMSELoss().to(device)
-        print("  Using Weighted MSE Loss")
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = AdamW(trainable_params, lr=cfg.lr, weight_decay=cfg.weight_decay)
     else:
-        main_criterion = nn.MSELoss()
-        print("  Using Simple MSE Loss")
-    
-    # Optimizer (freeze에 따라 다르게 설정)
-    if cfg.freeze_backbone:
-        # Backbone frozen: Head만 학습
-        head_params = (list(model.head_green.parameters()) + 
-                       list(model.head_clover.parameters()) +
-                       list(model.head_dead.parameters()) + 
-                       list(model.head_height.parameters()) +
-                       list(model.head_ndvi.parameters()) +
-                       list(model.film.parameters()))
-        optimizer = AdamW(head_params, lr=cfg.lr, weight_decay=cfg.weight_decay)
-    else:
-        # Full training
         backbone_params = list(model.backbone.parameters())
-        head_params = (list(model.head_green.parameters()) + 
-                       list(model.head_clover.parameters()) +
-                       list(model.head_dead.parameters()) + 
-                       list(model.head_height.parameters()) +
-                       list(model.head_ndvi.parameters()) +
-                       list(model.film.parameters()))
+        head_params = [p for n, p in model.named_parameters() if 'backbone' not in n]
         optimizer = AdamW([
             {'params': backbone_params, 'lr': cfg.lr * 0.1},
             {'params': head_params, 'lr': cfg.lr}
@@ -531,6 +491,13 @@ def train_fold(fold, train_df, cfg, device="cuda"):
     
     scaler = GradScaler()
     
+    # Loss
+    if cfg.use_weighted_loss:
+        main_criterion = WeightedMSELoss().to(device)
+        print("  ✓ Using Weighted MSE Loss")
+    else:
+        main_criterion = nn.MSELoss()
+    
     best_score = -float('inf')
     no_improve = 0
     best_oof = None
@@ -540,17 +507,17 @@ def train_fold(fold, train_df, cfg, device="cuda"):
         model.train()
         train_loss = 0
         
-        for left, right, full_targets, aux_targets in train_loader:
+        for left, right, targets, aux_targets in train_loader:
             left = left.to(device)
             right = right.to(device)
-            full_targets = full_targets.to(device)
+            targets = targets.to(device)
             aux_targets = aux_targets.to(device)
             
             optimizer.zero_grad()
             
             with autocast():
                 main_output, aux_output = model(left, right)
-                main_loss = main_criterion(main_output, full_targets)
+                main_loss = main_criterion(main_output, targets)
                 aux_loss = F.mse_loss(aux_output, aux_targets)
                 loss = main_loss + cfg.aux_weight * aux_loss
             
@@ -563,16 +530,16 @@ def train_fold(fold, train_df, cfg, device="cuda"):
         
         train_loss /= len(train_loader)
         
-        # Validate
+        # Validate & Collect OOF
         model.eval()
         all_preds, all_targets, all_indices = [], [], []
         
         with torch.no_grad():
-            for left, right, full_targets, _, indices in val_loader:
+            for left, right, targets, _, indices in val_loader:
                 left, right = left.to(device), right.to(device)
                 main_output, _ = model(left, right)
                 all_preds.append(main_output.cpu().numpy())
-                all_targets.append(full_targets.numpy())
+                all_targets.append(targets.numpy())
                 all_indices.extend(indices.numpy().tolist())
         
         preds = np.concatenate(all_preds)
@@ -619,41 +586,49 @@ def train_fold(fold, train_df, cfg, device="cuda"):
 # ## 🚀 Run Training
 
 #%%
+# Config 저장 (Grid Search 추적용)
+config_name = f"h{cfg.hidden_dim}_l{cfg.num_layers}_d{int(cfg.dropout*10)}"
+print(f"\n=== Config: {config_name} ===")
+
 run = wandb.init(
     entity=WANDB_ENTITY,
     project=WANDB_PROJECT,
-    name=EXP_NAME,
+    name=f"cv2_{config_name}",
     config={
         "version": "cv2",
-        "exp_name": EXP_NAME,
         "hidden_dim": cfg.hidden_dim,
         "num_layers": cfg.num_layers,
         "dropout": cfg.dropout,
+        "freeze_backbone": cfg.freeze_backbone,
         "use_weighted_loss": cfg.use_weighted_loss,
-        "img_size": cfg.img_size,
         "lr": cfg.lr,
+        "batch_size": cfg.batch_size,
+        "img_size": cfg.img_size,
     }
 )
 
 #%%
 print("\n" + "="*60)
-print(f"🚀 {EXP_NAME}")
+print("🚀 CV2 Training: Weighted Loss + Frozen Backbone")
 print("="*60)
 
 fold_scores = []
+all_oof = []
 
 for fold in range(5):
     print(f"\n--- Fold {fold} ---")
-    score, _ = train_fold(fold, train_wide, cfg)
+    score, oof = train_fold(fold, train_wide, cfg)
     fold_scores.append(score)
+    all_oof.append(oof)
 
 #%%
 mean_cv = np.mean(fold_scores)
 std_cv = np.std(fold_scores)
 
 print("\n" + "="*60)
-print(f"🎉 {EXP_NAME} RESULTS")
+print("🎉 CV2 RESULTS")
 print("="*60)
+print(f"Config: {config_name}")
 print(f"Folds: {[f'{s:.4f}' for s in fold_scores]}")
 print(f"Mean CV: {mean_cv:.4f} ± {std_cv:.4f}")
 
@@ -661,6 +636,7 @@ print(f"Mean CV: {mean_cv:.4f} ± {std_cv:.4f}")
 # ## 📊 OOF Score
 
 #%%
+# 전체 OOF score 계산
 all_predictions = []
 all_targets = []
 
@@ -680,41 +656,44 @@ print(f"\n✓ Total OOF Score: {total_oof_score:.4f}")
 
 #%%
 if GDRIVE_SAVE_PATH:
-    # 개별 파일 저장
+    # Config별 폴더 생성
+    save_dir = GDRIVE_SAVE_PATH / config_name
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 모델 복사
     for f in OUTPUT_DIR.glob("model_fold*.pth"):
-        shutil.copy(f, GDRIVE_SAVE_PATH / f.name)
+        shutil.copy(f, save_dir / f.name)
+    
+    # OOF 복사
     for f in OUTPUT_DIR.glob("oof_fold*.npy"):
-        shutil.copy(f, GDRIVE_SAVE_PATH / f.name)
+        shutil.copy(f, save_dir / f.name)
     
-    # === ZIP 압축 (편리한 다운로드용) ===
-    zip_path = GDRIVE_SAVE_PATH / f'{EXP_NAME}_models.zip'
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for f in OUTPUT_DIR.glob("model_fold*.pth"):
-            zf.write(f, f.name)
-        for f in OUTPUT_DIR.glob("oof_fold*.npy"):
-            zf.write(f, f.name)
-    print(f"✓ ZIP saved: {zip_path}")
-    
-    # 결과 JSON
-    with open(GDRIVE_SAVE_PATH / 'results.json', 'w') as f:
+    # 결과 저장
+    with open(save_dir / 'results.json', 'w') as f:
         json.dump({
-            'exp_name': EXP_NAME,
+            'config_name': config_name,
+            'hidden_dim': cfg.hidden_dim,
+            'num_layers': cfg.num_layers,
+            'dropout': cfg.dropout,
+            'freeze_backbone': cfg.freeze_backbone,
             'fold_scores': fold_scores,
             'mean_cv': float(mean_cv),
             'std_cv': float(std_cv),
             'total_oof_score': float(total_oof_score),
-            'config': {
-                'hidden_dim': cfg.hidden_dim,
-                'num_layers': cfg.num_layers,
-                'dropout': cfg.dropout,
-                'use_weighted_loss': cfg.use_weighted_loss,
-                'img_size': list(cfg.img_size),
-                'lr': cfg.lr,
-            }
         }, f, indent=2)
     
-    print(f"✓ All saved to: {GDRIVE_SAVE_PATH}")
+    # ⭐ ZIP 파일 생성
+    zip_path = save_dir / f'models_{config_name}.zip'
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for fold in range(5):
+            model_path = save_dir / f'model_fold{fold}.pth'
+            if model_path.exists():
+                zf.write(model_path, f'model_fold{fold}.pth')
+    
+    print(f"\n✓ All saved to: {save_dir}")
+    print(f"✓ ZIP file: {zip_path}")
 
+#%%
 wandb.log({
     "final/mean_cv": mean_cv,
     "final/std_cv": std_cv,
@@ -723,8 +702,6 @@ wandb.log({
 
 wandb.finish()
 
-print(f"\n" + "="*60)
-print(f"✅ {EXP_NAME} 완료!")
+print(f"\n🎉 Training complete!")
+print(f"   Config: {config_name}")
 print(f"   Mean CV: {mean_cv:.4f}")
-print(f"   OOF Score: {total_oof_score:.4f}")
-print("="*60)

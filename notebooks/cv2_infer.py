@@ -1,10 +1,10 @@
 #%% [markdown]
 # # CV2 Inference with TTA
 #
-# **특징**:
-# 1. 해상도 560 (학습과 동일)
-# 2. TTA: 4-fold flip
-# 3. 5-fold 앙상블
+# **CV2 모델 추론용**:
+# - Frozen Backbone으로 학습된 모델
+# - 4-fold TTA (HFlip x VFlip)
+# - 560x560 해상도
 
 #%%
 import warnings
@@ -53,22 +53,19 @@ class CFG:
     MODELS_DIR = Path("/kaggle/input/csiro-cv2-models")
     
     model_name = "vit_large_patch16_dinov3_qkvb.lvd1689m"
-    
-    # 해상도 (학습과 동일)
     img_size = (560, 560)
     
-    # ⚠️ 학습 시와 동일하게 설정!
+    # === Model Architecture (학습 시와 동일해야 함!) ===
     hidden_dim = 256
     num_layers = 2
     dropout = 0.3
-    use_layernorm = True
     
     # Inference
     batch_size = 16
     num_workers = 0
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    # TTA
+    # TTA 설정
     use_tta = True
     n_tta = 4
 
@@ -76,7 +73,7 @@ cfg = CFG()
 
 print(f"Device: {cfg.device}")
 print(f"Image size: {cfg.img_size}")
-print(f"Model: hidden={cfg.hidden_dim}, layers={cfg.num_layers}")
+print(f"Model: hidden_dim={cfg.hidden_dim}, num_layers={cfg.num_layers}")
 print(f"TTA: {cfg.use_tta} ({cfg.n_tta} augmentations)")
 
 TARGET_ORDER = ['Dry_Green_g', 'Dry_Dead_g', 'Dry_Clover_g', 'GDM_g', 'Dry_Total_g']
@@ -134,10 +131,11 @@ class FiLM(nn.Module):
         return torch.chunk(self.mlp(context), 2, dim=1)
 
 
-def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
+def make_head(in_dim, hidden_dim, num_layers, dropout):
     if num_layers == 1:
         return nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1)
@@ -148,8 +146,7 @@ def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
         for i in range(num_layers):
             layers.append(nn.Linear(current_dim, hidden_dim))
             if i < num_layers - 1:
-                if use_layernorm:
-                    layers.append(nn.LayerNorm(hidden_dim))
+                layers.append(nn.LayerNorm(hidden_dim))
                 layers.append(nn.ReLU(inplace=True))
                 layers.append(nn.Dropout(dropout))
             current_dim = hidden_dim
@@ -158,7 +155,7 @@ def make_head(in_dim, hidden_dim, num_layers, dropout, use_layernorm=True):
 
 
 class CSIROModelCV2(nn.Module):
-    """CV2 모델"""
+    """CV2 모델 (Inference용)"""
     def __init__(self, cfg, backbone_weights_path=None):
         super().__init__()
         
@@ -176,12 +173,9 @@ class CSIROModelCV2(nn.Module):
         
         self.film = FiLM(feat_dim)
         
-        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, 
-                                    cfg.dropout, cfg.use_layernorm)
-        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers,
-                                     cfg.dropout, cfg.use_layernorm)
-        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers,
-                                   cfg.dropout, cfg.use_layernorm)
+        self.head_green = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
+        self.head_clover = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
+        self.head_dead = make_head(combined_dim, cfg.hidden_dim, cfg.num_layers, cfg.dropout)
         
         self.head_height = nn.Sequential(
             nn.Linear(combined_dim, 256), nn.ReLU(inplace=True),
@@ -220,13 +214,10 @@ class CSIROModelCV2(nn.Module):
 
 #%%
 @torch.no_grad()
-def predict_single(model, left, right, device):
-    return model(left.to(device), right.to(device)).cpu()
-
-
-@torch.no_grad()
 def predict_with_tta(model, left, right, device, n_tta=4):
-    """TTA: HFlip x VFlip = 4가지"""
+    """
+    TTA: HFlip x VFlip = 4가지 조합
+    """
     preds = []
     
     for hflip in [False, True]:
@@ -248,6 +239,7 @@ def predict_with_tta(model, left, right, device, n_tta=4):
 
 
 def predict_batch(model, loader, cfg):
+    """배치 예측"""
     model.eval()
     device = cfg.device
     all_outputs, all_ids = [], []
@@ -256,7 +248,7 @@ def predict_batch(model, loader, cfg):
         if cfg.use_tta:
             outputs = predict_with_tta(model, left, right, device, cfg.n_tta)
         else:
-            outputs = predict_single(model, left, right, device)
+            outputs = model(left.to(device), right.to(device)).cpu()
         
         all_outputs.append(outputs.numpy())
         all_ids.extend(ids)
@@ -265,6 +257,7 @@ def predict_batch(model, loader, cfg):
 
 
 def predict_ensemble(cfg, loader):
+    """5-fold 앙상블 예측"""
     model_files = sorted(cfg.MODELS_DIR.glob("model_fold*.pth"))
     print(f"\nFound {len(model_files)} models")
     
@@ -296,6 +289,7 @@ def predict_ensemble(cfg, loader):
 # ## 📋 Main
 
 #%%
+# 데이터 로드
 test_df = pd.read_csv(cfg.DATA_PATH / "test.csv")
 test_df['sample_id_prefix'] = test_df['sample_id'].str.split('__').str[0]
 test_wide = test_df.drop_duplicates(subset=['image_path']).reset_index(drop=True)
@@ -305,18 +299,21 @@ print(f"Test samples: {len(test_wide)}")
 print("\n" + "="*60)
 print("🚀 CV2 Inference with TTA")
 print("="*60)
-print(f"Model: hidden={cfg.hidden_dim}, layers={cfg.num_layers}")
+print(f"Model: hidden_dim={cfg.hidden_dim}, num_layers={cfg.num_layers}")
 print(f"TTA: {cfg.n_tta}-fold")
 
+# DataLoader
 transform = get_test_transform(cfg)
 dataset = TestDataset(test_wide, cfg, transform)
 loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=False,
                    num_workers=cfg.num_workers, pin_memory=True)
 
+# 예측
 predictions, sample_ids = predict_ensemble(cfg, loader)
 print(f"\nPredictions: {predictions.shape}")
 
 #%%
+# 예측 통계
 print("\n=== Prediction Statistics ===")
 print(f"{'Target':<15} {'Mean':>10} {'Std':>10} {'Min':>10} {'Max':>10}")
 for idx, target in enumerate(TARGET_ORDER):
@@ -324,6 +321,7 @@ for idx, target in enumerate(TARGET_ORDER):
     print(f"{target:<15} {vals.mean():>10.2f} {vals.std():>10.2f} {vals.min():>10.2f} {vals.max():>10.2f}")
 
 #%%
+# Submission 생성
 pred_df = pd.DataFrame(predictions, columns=TARGET_ORDER)
 pred_df['sample_id_prefix'] = sample_ids
 
@@ -338,6 +336,7 @@ sub_df['sample_id'] = sub_df['sample_id_prefix'] + '__' + sub_df['target_name']
 submission = sub_df[['sample_id', 'target']]
 submission.to_csv('submission.csv', index=False)
 
+# 검증
 sample_sub = pd.read_csv(cfg.DATA_PATH / "sample_submission.csv")
 assert len(submission) == len(sample_sub), "Format mismatch!"
 
