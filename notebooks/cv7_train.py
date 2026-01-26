@@ -357,6 +357,20 @@ class CSIROModel(nn.Module):
         return main_output, aux_output
 
 #%% [markdown]
+# ## ⚖️ Weighted Loss (Full Targets)
+
+#%%
+class WeightedMSELoss(nn.Module):
+    """Competition-weighted MSE on full 5 targets."""
+    def __init__(self):
+        super().__init__()
+        # [Green, Dead, Clover, GDM, Total]
+        self.register_buffer('weights', torch.tensor([0.1, 0.1, 0.1, 0.2, 0.5]))
+
+    def forward(self, pred, target):
+        return ((pred - target) ** 2 * self.weights).mean()
+
+#%% [markdown]
 # ## 🏋️ Training with OOF Collection
 
 #%%
@@ -398,6 +412,7 @@ def train_fold(fold, train_df, cfg, device="cuda"):
     warmup_steps = int(total_steps * cfg.warmup_ratio)
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
     
+    weighted_mse = WeightedMSELoss().to(device)
     scaler = GradScaler()
     
     best_score = -float('inf')
@@ -419,8 +434,16 @@ def train_fold(fold, train_df, cfg, device="cuda"):
             
             with autocast():
                 main_output, aux_output = model(left, right)
-                pred = main_output[:, [0, 2, 1]]
-                main_loss = F.mse_loss(pred, main_targets)
+                # Build full targets in competition order: [Green, Dead, Clover, GDM, Total]
+                green = main_targets[:, 0:1]
+                clover = main_targets[:, 1:2]
+                dead = main_targets[:, 2:3]
+                gdm = green + clover
+                total = gdm + dead
+                full_targets = torch.cat([green, dead, clover, gdm, total], dim=1)
+
+                # Weighted loss on full targets to align with metric
+                main_loss = weighted_mse(main_output, full_targets)
                 aux_loss = F.mse_loss(aux_output, aux_targets)
                 loss = main_loss + cfg.aux_weight * aux_loss
             

@@ -4,7 +4,7 @@
 # **Goal**: Single full-frame approach (no left/right split)
 #
 # **Key Ideas**:
-# - **Full-frame rectangular input (560x240)**: preserve 70×30 aspect ratio
+# - **Full-frame rectangular input (784x336)**: preserve 70×30 aspect ratio
 # - **CLS + Patch Mean pooling**: richer global + local aggregation
 # - **SSF adapters**: lightweight backbone adaptation (scale/shift)
 # - **Zero-Inflated Clover head** + physics constraints
@@ -102,8 +102,8 @@ seed_everything(42)
 class CFG:
     # Model settings
     model_name = "vit_large_patch16_dinov3_qkvb.lvd1689m"
-    # Full-frame: 70x30 aspect → (H=240, W=560), H/W divisible by 16
-    img_size = (240, 560)
+    # Full-frame: 70x30 aspect → (H=336, W=784), H/W divisible by 16
+    img_size = (336, 784)
     backbone_dim = 1024
     freeze_backbone = True
     use_ssf = True
@@ -120,7 +120,8 @@ class CFG:
     warmup_ratio = 0.1
     grad_clip = 1.0
     
-    batch_size = 8
+    # High-res full-frame: reduce batch to avoid OOM
+    batch_size = 4
     epochs = 25
     patience = 7
     
